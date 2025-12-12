@@ -522,7 +522,7 @@
 
       renderResults() {
         const grid = document.getElementById('results-grid');
-        const modeData = DB[this.state.mode];
+        const modeData = DB[this.getModeKey()];
         const params = this.state.searchParams;
 
         let html = '';
@@ -591,16 +591,40 @@
         }
       },
 
+      // Map UI mode to DB keys (DB uses plural keys for flights/trains)
+      getModeKey() {
+        if (this.state.mode === 'flight') return 'flights';
+        if (this.state.mode === 'train') return 'trains';
+        return this.state.mode;
+      },
+
       // --- Booking Flow ---
       openBooking(id) {
+        // Ensure user is loaded (fallback to localStorage in case state wasn't initialized)
         if (!this.state.user) {
-          // Redirect to actual login page instead of mock modal
+          const userStr = localStorage.getItem('travelEase_user');
+          if (userStr) {
+            try { this.state.user = JSON.parse(userStr); } catch (e) { this.state.user = null; }
+          }
+        }
+        if (!this.state.user) {
+          // Redirect to sign-in page
           window.location.href = 'signin.html';
           return;
         }
 
-        const item = DB[this.state.mode].find(i => i.id === id);
+        const item = DB[this.getModeKey()]?.find(i => i.id === id);
+        if (!item) return this.showToast('Selected item not found', 'error');
         this.state.currentItem = item;
+
+        // Provide sensible defaults when search params are missing
+        if (!this.state.searchParams || !this.state.searchParams.date) {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          this.state.searchParams = this.state.searchParams || {};
+          this.state.searchParams.date = tomorrow.toISOString().split('T')[0];
+        }
+        if (!this.state.searchParams.pax) this.state.searchParams.pax = 1;
 
         // Populate Modal
         document.getElementById('modal-img').src = item.img;
@@ -609,7 +633,7 @@
         document.getElementById('modal-price').textContent = `₹${item.price.toLocaleString()}`;
         document.getElementById('modal-date').value = this.state.searchParams.date;
         document.getElementById('modal-pax').value = this.state.searchParams.pax;
-        
+
         // Show Modal
         document.getElementById('booking-modal').classList.remove('hidden');
       },
@@ -653,8 +677,19 @@
         const bookings = JSON.parse(localStorage.getItem('travelEase_bookings') || '[]');
 
         if (bookings.length === 0) {
-          // Keep empty state (handled in HTML)
-          return; 
+          // Restore default empty state HTML
+          container.innerHTML = `
+        <div class="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+          <div class="mx-auto w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+            <i data-lucide="map" class="w-8 h-8 text-slate-300"></i>
+          </div>
+          <h3 class="text-lg font-medium text-slate-900">No trips booked yet</h3>
+          <p class="text-slate-500 text-sm mt-1 mb-4">Time to start planning your next adventure!</p>
+          <button onclick="app.scrollTo('hero')" class="text-brand-600 font-semibold hover:underline">Start Searching</button>
+        </div>
+          `;
+          lucide.createIcons();
+          return;
         }
 
         let html = '';
@@ -676,7 +711,7 @@
                     <p class="font-bold text-slate-900">₹${b.price.toLocaleString()}</p>
                     <p class="text-xs text-emerald-600 font-medium">Confirmed</p>
                  </div>
-                 <button onclick="app.cancelBooking(${b.id})" class="text-slate-400 hover:text-red-500 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                 <button onclick="app.cancelBooking('${b.id}')" class="text-slate-400 hover:text-red-500 p-2"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                </div>
              </div>
            `;
@@ -686,14 +721,14 @@
       },
 
       cancelBooking(id) {
-        if(confirm('Are you sure you want to cancel this booking?')) {
-          let bookings = JSON.parse(localStorage.getItem('travelEase_bookings') || '[]');
-          bookings = bookings.filter(b => b.id !== id);
-          localStorage.setItem('travelEase_bookings', JSON.stringify(bookings));
-          this.renderBookings();
-          if(bookings.length === 0) location.reload(); // Refresh to show empty state
-          this.showToast('Booking Cancelled', 'error');
-        }
+        if(!confirm('Are you sure you want to cancel this booking?')) return;
+        // Compare IDs as strings to support alphanumeric IDs like 't2', 'f1'
+        const idStr = String(id);
+        let bookings = JSON.parse(localStorage.getItem('travelEase_bookings') || '[]');
+        bookings = bookings.filter(b => String(b.id) !== idStr);
+        localStorage.setItem('travelEase_bookings', JSON.stringify(bookings));
+        this.renderBookings();
+        this.showToast('Booking Cancelled', 'error');
       },
 
       // --- Auth ---
